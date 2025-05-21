@@ -31,6 +31,7 @@ const ClockHeatmap = ({
   colorScheme = 'default'
 }: ClockHeatmapProps) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [currentTime, setCurrentTime] = useState<Date>(new Date());
   const [isZoomed, setIsZoomed] = useState(false);
   const [zoomPosition, setZoomPosition] = useState({ x: 0, y: 0 });
@@ -38,14 +39,6 @@ const ClockHeatmap = ({
   const [hoveredClock, setHoveredClock] = useState<{ x: number, y: number, time: string } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [wheelTimeout, setWheelTimeout] = useState<number | null>(null);
-  const [wheelEventCount, setWheelEventCount] = useState(0);
-  const [lastWheelEventTime, setLastWheelEventTime] = useState(0);
-  const [isPanningMode, setIsPanningMode] = useState(false);
-
-  // Default modes
-  const WHEEL_MODE_DELAY = 300; // ms to wait to determine if wheel is for zoom or pan
-  const WHEEL_EVENTS_THRESHOLD = 2; // Number of fast wheel events to identify as panning
 
   // Convert time to seconds since midnight (mod 12 hours)
   const timeToSeconds = (time: Date): number => {
@@ -424,11 +417,9 @@ const ClockHeatmap = ({
         );
       }
 
-      // Draw controls panel background
+      // Draw zoom out button
       ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
-      ctx.fillRect(width - 110, 10, 100, 130);
-
-      // Draw a zoom out button
+      ctx.fillRect(width - 110, 10, 100, 40);
       ctx.fillStyle = 'rgba(60, 60, 60, 0.9)';
       ctx.fillRect(width - 100, 20, 80, 25);
       ctx.fillStyle = 'white';
@@ -436,35 +427,6 @@ const ClockHeatmap = ({
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText('Zoom Out', width - 60, 32);
-
-      // Zoom in button
-      ctx.fillStyle = 'rgba(60, 60, 60, 0.9)';
-      ctx.fillRect(width - 100, 55, 35, 25);
-      ctx.fillStyle = 'white';
-      ctx.font = '16px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('+', width - 82, 67);
-
-      // Zoom out button
-      ctx.fillStyle = 'rgba(60, 60, 60, 0.9)';
-      ctx.fillRect(width - 55, 55, 35, 25);
-      ctx.fillStyle = 'white';
-      ctx.font = '16px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText('-', width - 37, 67);
-
-      // Zoom level indicator
-      ctx.fillStyle = 'white';
-      ctx.font = '12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(`Zoom: ${zoomLevel}x`, width - 60, 95);
-
-      // Pan mode indicator
-      ctx.fillStyle = isPanningMode ? 'rgba(60, 200, 60, 0.9)' : 'rgba(60, 60, 60, 0.9)';
-      ctx.fillRect(width - 100, 110, 80, 25);
-      ctx.fillStyle = 'white';
-      ctx.font = '14px sans-serif';
-      ctx.fillText('Pan Mode', width - 60, 122);
 
     } else {
       // Normal view - draw a grid of mini-clocks
@@ -545,18 +507,6 @@ const ClockHeatmap = ({
     }
   };
 
-  // Toggle panning mode
-  const togglePanningMode = () => {
-    setIsPanningMode(!isPanningMode);
-
-    // Reset wheel-related states
-    setWheelEventCount(0);
-    if (wheelTimeout) {
-      clearTimeout(wheelTimeout);
-      setWheelTimeout(null);
-    }
-  };
-
   // Handle canvas click events
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -573,36 +523,13 @@ const ClockHeatmap = ({
       return;
     }
 
-    // Check if clicking the pan mode button
-    if (isZoomed && x > width - 100 && x < width - 20 && y > 110 && y < 135) {
-      togglePanningMode();
-      return;
-    }
-
-    // Check if clicking the zoom in/out buttons
-    if (isZoomed) {
-      // Zoom in button
-      if (x > width - 100 && x < width - 65 && y > 55 && y < 80) {
-        const newZoomLevel = Math.min(MAX_ZOOM_LEVEL, zoomLevel + 5);
-        setZoomLevel(newZoomLevel);
-        return;
-      }
-
-      // Zoom out button
-      if (x > width - 55 && x < width - 20 && y > 55 && y < 80) {
-        const newZoomLevel = Math.max(5, zoomLevel - 5);
-        setZoomLevel(newZoomLevel);
-        return;
-      }
-    }
-
     // Get grid position
     const gridPos = getGridPositionFromCanvas(e.clientX, e.clientY);
 
     if (isZoomed) {
       // If already zoomed, update position
       setZoomPosition(gridPos);
-      // Only increase zoom level if not already at maximum
+      // Increase zoom level if not already at maximum
       if (zoomLevel < MAX_ZOOM_LEVEL) {
         setZoomLevel(Math.min(MAX_ZOOM_LEVEL, zoomLevel + 5)); // Zoom in more
       }
@@ -627,10 +554,10 @@ const ClockHeatmap = ({
       const scaleX = GRID_WIDTH / rect.width;
       const scaleY = GRID_HEIGHT / rect.height;
 
-      // Update zoom position based on drag distance
+      // Update zoom position based on drag distance - allow panning across the entire grid
       setZoomPosition({
-        x: Math.max(0, Math.min(GRID_WIDTH, zoomPosition.x - dx * scaleX / zoomLevel)),
-        y: Math.max(0, Math.min(GRID_HEIGHT, zoomPosition.y - dy * scaleY / zoomLevel))
+        x: Math.max(0, Math.min(GRID_WIDTH, zoomPosition.x - dx * scaleX)),
+        y: Math.max(0, Math.min(GRID_HEIGHT, zoomPosition.y - dy * scaleY))
       });
 
       // Update drag start
@@ -659,8 +586,8 @@ const ClockHeatmap = ({
   const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!isZoomed) return;
 
-    // Don't start drag if clicking buttons
-    if (e.clientX > width - 110 && e.clientX < width - 10 && e.clientY < 135) {
+    // Don't start drag if clicking the zoom out button
+    if (e.clientX > width - 110 && e.clientX < width - 10 && e.clientY < 45) {
       return;
     }
 
@@ -681,7 +608,7 @@ const ClockHeatmap = ({
     // Reset cursor style
     const canvas = canvasRef.current;
     if (canvas) {
-      canvas.style.cursor = isZoomed ? 'crosshair' : 'pointer';
+      canvas.style.cursor = isZoomed ? 'grab' : 'pointer';
     }
   };
 
@@ -691,64 +618,40 @@ const ClockHeatmap = ({
     setHoveredClock(null);
   };
 
-  // Handle mouse wheel for zooming or panning
+  // Handle mouse wheel for zooming
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
     if (!isZoomed) return;
 
     e.preventDefault();
 
-    const now = Date.now();
-
-    // Detect if we're in a series of rapid wheel events (scrolling on touchpad)
-    if (now - lastWheelEventTime < 100) {
-      setWheelEventCount(wheelEventCount + 1);
+    if (e.ctrlKey) {
+      // Pinch to zoom gesture
+      const zoomDirection = e.deltaY < 0 ? 1 : -1;
+      const newZoomLevel = Math.max(5, Math.min(MAX_ZOOM_LEVEL, zoomLevel + zoomDirection * 2));
+      setZoomLevel(newZoomLevel);
     } else {
-      setWheelEventCount(1);
-    }
-
-    setLastWheelEventTime(now);
-
-    // If in explicit pan mode or we've detected rapid scrolling
-    if (isPanningMode || wheelEventCount > WHEEL_EVENTS_THRESHOLD) {
-      // For panning, we'll use deltaX and deltaY to move the view
+      // Normal wheel - pan
       const rect = e.currentTarget.getBoundingClientRect();
       const scaleX = GRID_WIDTH / rect.width;
       const scaleY = GRID_HEIGHT / rect.height;
 
-      // Calculate pan amount (normalized to grid)
-      const moveX = e.deltaX * scaleX / zoomLevel * 0.4;
-      const moveY = e.deltaY * scaleY / zoomLevel * 0.4;
+      // Pan amount - increase to allow panning across the entire grid
+      const moveX = e.deltaX * scaleX * 0.5;
+      const moveY = e.deltaY * scaleY * 0.5;
 
-      // Update zoom position (panning)
+      // Update position (panning) - allow panning across the entire grid
       setZoomPosition({
         x: Math.max(0, Math.min(GRID_WIDTH, zoomPosition.x + moveX)),
         y: Math.max(0, Math.min(GRID_HEIGHT, zoomPosition.y + moveY))
       });
-    } else {
-      // For zooming in/out
-      const zoomDelta = e.deltaY > 0 ? -2 : 2;
-      const newZoomLevel = Math.max(5, Math.min(MAX_ZOOM_LEVEL, zoomLevel + zoomDelta));
-      setZoomLevel(newZoomLevel);
-
-      // Clear any existing timeout
-      if (wheelTimeout) {
-        clearTimeout(wheelTimeout);
-      }
-
-      // Set a timeout to determine if this is a zoom action or pan
-      const timeout = window.setTimeout(() => {
-        setWheelEventCount(0);
-      }, WHEEL_MODE_DELAY);
-
-      setWheelTimeout(timeout);
     }
   };
 
-  // Handle keyboard shortcuts
+  // Handle key presses for keyboard shortcuts
   const handleKeyDown = (e: KeyboardEvent) => {
     if (!isZoomed) return;
 
-    const panAmount = 5 / zoomLevel; // Adjust pan speed based on zoom level
+    const panAmount = 5; // Fixed pan speed that doesn't depend on zoom level
 
     switch (e.key) {
       case 'ArrowLeft':
@@ -793,11 +696,6 @@ const ClockHeatmap = ({
         setIsZoomed(false);
         e.preventDefault();
         break;
-      case 'p':
-      case 'P':
-        togglePanningMode();
-        e.preventDefault();
-        break;
       default:
         break;
     }
@@ -819,11 +717,8 @@ const ClockHeatmap = ({
     return () => {
       window.removeEventListener('resize', handleResize);
       window.removeEventListener('keydown', handleKeyDown);
-      if (wheelTimeout) {
-        clearTimeout(wheelTimeout);
-      }
     };
-  }, [width, height, colorScheme, isZoomed, zoomPosition, zoomLevel, hoveredClock, isPanningMode]);
+  }, [width, height, colorScheme, isZoomed, zoomPosition, zoomLevel, hoveredClock]);
 
   // Effect for updating time
   useEffect(() => {
@@ -837,7 +732,7 @@ const ClockHeatmap = ({
     }, 1000);
 
     return () => clearInterval(intervalId);
-  }, [colorScheme, isZoomed, zoomPosition, zoomLevel, isPanningMode]); // Only re-setup the interval when these change
+  }, [colorScheme, isZoomed, zoomPosition, zoomLevel]); // Only re-setup the interval when these change
 
   // Effect for redrawing when time changes
   useEffect(() => {
@@ -845,7 +740,7 @@ const ClockHeatmap = ({
   }, [currentTime]);
 
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <canvas
         ref={canvasRef}
         width={width}
@@ -865,8 +760,7 @@ const ClockHeatmap = ({
         <div className="absolute bottom-4 left-4 bg-black/70 text-white px-3 py-1 rounded-lg text-sm">
           <p>
             <kbd className="px-2 py-1 bg-zinc-800 rounded">Arrow Keys</kbd> to pan •
-            <kbd className="ml-1 px-2 py-1 bg-zinc-800 rounded">+/-</kbd> to zoom •
-            <kbd className="ml-1 px-2 py-1 bg-zinc-800 rounded">P</kbd> to toggle pan mode
+            <kbd className="ml-1 px-2 py-1 bg-zinc-800 rounded">+/-</kbd> to zoom
           </p>
         </div>
       )}
